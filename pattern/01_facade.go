@@ -27,13 +27,13 @@ type Service2 struct {
 
 func (s *Service1) Strat(id int) bool {
 	s.id = id
-	fmt.Printf("Start servise ID=%d", s.id)
+	fmt.Printf("Start servise ID=%d\n", s.id)
 	return true
 }
 
 func (s *Service2) Strat(id int) bool {
 	s.id = id
-	fmt.Printf("Start servise ID=%d", s.id)
+	fmt.Printf("Start servise ID=%d\n", s.id)
 	return true
 }
 

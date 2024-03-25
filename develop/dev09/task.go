@@ -8,6 +8,49 @@ package main
 Программа должна проходить все тесты. Код должен проходить проверки go vet и golint.
 */
 
-func main() {
+import (
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"strings"
+)
 
+func main() {
+	if len(os.Args) <= 1 {
+		fmt.Println("Вы не ввели аргумент")
+		return
+	}
+	url := os.Args[1]
+	resp, err := http.Get(url)
+	if err != nil {
+		fmt.Println("Ошибка при выполнении запроса:", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	// Создание файла для сохранения содержимого страницы
+	fileName := getFileName(url)
+	file, err := os.Create(fileName)
+	if err != nil {
+		fmt.Println("Ошибка при создании файла:", err)
+		return
+	}
+	defer file.Close()
+
+	// Копирование содержимого страницы в файл
+	_, err = io.Copy(file, resp.Body)
+	if err != nil {
+		fmt.Println("Ошибка при сохранении содержимого страницы:", err)
+		return
+	}
+
+	fmt.Println("Страница успешно загружена и сохранена в файл", fileName)
+}
+
+// Функция для получения имени файла из URL
+func getFileName(url string) string {
+	parts := strings.Split(url, "/")
+	fileName := parts[len(parts)-1]
+	return fileName
 }
