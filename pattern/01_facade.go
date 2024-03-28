@@ -9,29 +9,29 @@ import "fmt"
 */
 
 type Service interface {
-	Strat(id int) bool
+	Start(id int) bool
 	Stop() bool
 }
 
-type ServiceManager struct {
+type ServiceManager struct { // Фасад, с помощью которого идет управление другими сервисами, структурами
 	Services []Service
 }
 
-type Service1 struct {
+type Service1 struct { // Сервис 1
 	id int
 }
 
-type Service2 struct {
+type Service2 struct { // Сервис 1
 	id int
 }
 
-func (s *Service1) Strat(id int) bool {
+func (s *Service1) Start(id int) bool {
 	s.id = id
 	fmt.Printf("Start servise ID=%d\n", s.id)
 	return true
 }
 
-func (s *Service2) Strat(id int) bool {
+func (s *Service2) Start(id int) bool {
 	s.id = id
 	fmt.Printf("Start servise ID=%d\n", s.id)
 	return true
@@ -54,6 +54,6 @@ func NewServiceManager() *ServiceManager {
 
 func (sm ServiceManager) StartAll() {
 	for i, serv := range sm.Services {
-		serv.Strat(i)
+		serv.Start(i)
 	}
 }
