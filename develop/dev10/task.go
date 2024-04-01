@@ -15,6 +15,45 @@ go-telnet --timeout=10s host port go-telnet mysite.ru 8080 go-telnet --timeout=3
 При подключении к несуществующему сервер, программа должна завершаться через timeout.
 */
 
-func main() {
+import (
+	"fmt"
+	"io"
+	"net"
+	"os"
+	"time"
+)
 
+func main() {
+	if len(os.Args) < 3 {
+		fmt.Println("Usage: go-telnet [--timeout=<timeout>] <host> <port>")
+		return
+	}
+
+	var timeout time.Duration = 10 * time.Second
+	var host string
+	var port string
+
+	if os.Args[1] == "--timeout" {
+		timeout, _ = time.ParseDuration(os.Args[2])
+		host = os.Args[3]
+		port = os.Args[4]
+	} else {
+		host = os.Args[1]
+		port = os.Args[2]
+	}
+	fmt.Println(host, port)
+
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, port), timeout)
+	if err != nil {
+		fmt.Println("Error connecting to the server:", err)
+		return
+	}
+	defer conn.Close()
+
+	go func() {
+		_, _ = io.Copy(conn, os.Stdin)
+		conn.Close()
+	}()
+
+	_, _ = io.Copy(os.Stdout, conn)
 }

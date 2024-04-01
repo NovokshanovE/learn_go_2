@@ -18,54 +18,57 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 )
 
 func main() {
-	// Определение флагов
-	f := flag.String("f", "", "выбрать поля (колонки)")
-	d := flag.String("d", "\t", "использовать другой разделитель")
-	s := flag.Bool("s", false, "только строки с разделителем")
-
+	var (
+		fields    = flag.String("f", "", "choose fields (columns)")
+		delimiter = flag.String("d", "\t", "use another delimiter")
+		separated = flag.Bool("s", false, "only lines with delimiter")
+	)
 	flag.Parse()
 
-	// Преобразование строки с номерами полей в слайс
-	var fields []int
-	if *f != "" {
-		for _, field := range strings.Split(*f, ",") {
-			fields = append(fields, atoi(field)-1) // -1, потому что индексация начинается с 0
-		}
+	if *fields == "" {
+		fmt.Fprintln(os.Stderr, "Usage: cut -f <fields> [-d <delimiter>] [-s]")
+		os.Exit(1)
 	}
+
+	fieldIndexes := parseFields(*fields)
 
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
 		line := scanner.Text()
 
-		// Если ключ -s активен и в строке нет разделителя, пропускаем строку
-		if *s && !strings.Contains(line, *d) {
+		// Если установлен флаг -s и разделитель не найден, пропускаем строку
+		if *separated && !strings.Contains(line, *delimiter) {
 			continue
 		}
 
-		columns := strings.Split(line, *d)
-		for _, field := range fields {
-			if field < len(columns) {
-				fmt.Print(columns[field] + " ")
+		columns := strings.Split(line, *delimiter)
+		var output []string
+		for _, index := range fieldIndexes {
+			if index < len(columns) {
+				output = append(output, columns[index])
 			}
 		}
-		fmt.Println()
+
+		fmt.Println(strings.Join(output, *delimiter))
 	}
 
 	if err := scanner.Err(); err != nil {
-		fmt.Fprintln(os.Stderr, "Ошибка чтения ввода:", err)
+		fmt.Fprintln(os.Stderr, "Error reading standard input:", err)
 	}
 }
 
-func atoi(s string) int {
-	n, err := strconv.Atoi(s)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "Ошибка преобразования строки в число:", err)
-		os.Exit(1)
+// parseFields преобразует строку полей в срез индексов
+func parseFields(fieldStr string) []int {
+	var fields []int
+	for _, f := range strings.Split(fieldStr, ",") {
+		var fieldIndex int
+		fmt.Sscanf(f, "%d", &fieldIndex)
+		// Уменьшаем индекс на 1, так как пользователь вводит поля начиная с 1, а индексы в Go начинаются с 0
+		fields = append(fields, fieldIndex-1)
 	}
-	return n
+	return fields
 }

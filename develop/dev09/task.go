@@ -50,6 +50,11 @@ func main() {
 
 // Функция для получения имени файла из URL
 func getFileName(url string) string {
+	if url[len(url)-1] == '/' {
+		parts := strings.Split(url, "/")
+		fileName := parts[len(parts)-2]
+		return fileName
+	}
 	parts := strings.Split(url, "/")
 	fileName := parts[len(parts)-1]
 	return fileName
