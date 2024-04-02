@@ -1,5 +1,14 @@
 package main
 
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"strconv"
+	"time"
+)
+
 /*
 === HTTP server ===
 
@@ -29,190 +38,261 @@ GET /events_for_month
  4. Код должен проходить проверки go vet и golint.
 */
 
-import (
-	"encoding/json"
-	"log"
-	"net/http"
-	"net/url"
-	"strconv"
-	"time"
-)
-
+// Событие календаря
 type Event struct {
-	ID     int    `json:"id"`
-	UserID int    `json:"user_id"`
-	Title  string `json:"title"`
-	Date   string `json:"date"`
+	ID     int       `json:"id"`
+	UserID int       `json:"user_id"`
+	Date   time.Time `json:"date"`
+	Title  string    `json:"title"`
 }
 
-func toJSON(e Event) ([]byte, error) {
-	return json.Marshal(e)
+// Calendar представляет календарь событий.
+type Calendar struct {
+	Events []*Event
 }
 
-func parseAndValidateParams(values url.Values) (Event, error) {
-	user_id, err := strconv.Atoi(values.Get("user_id"))
+var Calender = Calendar{
+	Events: make([]*Event, 0),
+}
+
+// Шаблон для отправления ошибки
+type JSONError struct {
+	Error string `json:"error"`
+}
+
+// Шаблон для отправления ответа
+type JSONResult struct {
+	Result string `json:"result"`
+}
+
+// Отправляет ответ по http
+func JSONResponse(w http.ResponseWriter, status int, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(data)
+}
+
+// парсит и валидирует параметры методов /create_event и /update_event и /delete_event
+func ParseInputDataToEvent(r *http.Request) (*Event, error) {
+	userID, err := strconv.Atoi(r.FormValue("user_id"))
+	// log.Println(r.Form, " ",r.FormValue("user_id"))
 	if err != nil {
-		return Event{}, err
+		return nil, fmt.Errorf("invalid user_id")
 	}
 
-	title := values.Get("title")
-	date := values.Get("date")
+	dateStr := r.FormValue("date")
+	date, err := time.Parse("2006-01-02", dateStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid date format")
+	}
 
-	return Event{ID: len(events), UserID: user_id, Title: title, Date: date}, nil
+	title := r.FormValue("title")
+
+	event := &Event{
+		UserID: userID,
+		Date:   date,
+		Title:  title,
+	}
+
+	return event, nil
 }
 
-// func createEvent(w http.ResponseWriter, r *http.Request) {
-// 	if r.Method != http.MethodPost {
-// 		http.Error(w, "Invalid method", http.StatusMethodNotAllowed)
-// 		return
-// 	}
+// POST /create_event.
+func CreateEventHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		JSONResponse(w, http.StatusInternalServerError, JSONError{Error: "Not a post request"})
+		return
+	}
 
-// 	event, err := parseAndValidateParams(r.URL.Query())
-// 	if err != nil {
-// 		http.Error(w, "Invalid parameters", http.StatusBadRequest)
-// 		return
-// 	}
+	event, err := ParseInputDataToEvent(r)
+	if err != nil {
+		JSONResponse(w, http.StatusBadRequest, JSONError{Error: err.Error()})
+		return
+	}
 
-// 	// Здесь должна быть логика создания события
+	event.ID = len(Calender.Events)
+	Calender.Events = append(Calender.Events, event)
 
-// 	jsonData, err := toJSON(event)
-// 	if err != nil {
-// 		http.Error(w, "Error creating JSON", http.StatusInternalServerError)
-// 		return
-// 	}
+	JSONResponse(w, http.StatusOK, JSONResult{Result: "Event created"})
+}
 
-// 	w.Header().Set("Content-Type", "application/json")
-// 	w.Write(jsonData)
-// }
+// POST /update_event.
+func UpdateEventHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		JSONResponse(w, http.StatusInternalServerError, JSONError{Error: "Not a post request"})
+		return
+	}
 
-// Аналогично можно реализовать остальные обработчики
+	event, err := ParseInputDataToEvent(r)
+	if err != nil {
+		JSONResponse(w, http.StatusBadRequest, JSONError{Error: err.Error()})
+		return
+	}
 
-func loggingMiddleware(next http.Handler) http.Handler {
+	iter := -1
+	for i, val := range Calender.Events {
+		if val.UserID == event.UserID && val.Date == event.Date {
+			iter = i
+			Calender.Events[iter] = event
+			break
+		}
+	}
+
+	if iter == -1 {
+		JSONResponse(w, http.StatusServiceUnavailable, JSONError{Error: "No event found"})
+		return
+	}
+
+	JSONResponse(w, http.StatusOK, JSONResult{Result: "Event updated"})
+}
+
+// POST /delete_event.
+func DeleteEventHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		JSONResponse(w, http.StatusInternalServerError, JSONError{Error: "Not a post request"})
+		return
+	}
+
+	event, err := ParseInputDataToEvent(r)
+	if err != nil {
+		JSONResponse(w, http.StatusBadRequest, JSONError{Error: err.Error()})
+		return
+	}
+
+	iter := -1
+	for i, val := range Calender.Events {
+		if val.UserID == event.UserID && val.Date == event.Date && val.Title == event.Title {
+			iter = i
+			break
+		}
+	}
+
+	if iter == -1 {
+		JSONResponse(w, http.StatusServiceUnavailable, JSONError{Error: "No event found"})
+		return
+	}
+
+	Calender.Events = append(Calender.Events[:iter], Calender.Events[iter+1:]...)
+	JSONResponse(w, http.StatusOK, JSONResult{Result: "Event deleted"})
+}
+
+// GET /events_for_day.
+func EventsForDayHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		JSONResponse(w, http.StatusInternalServerError, JSONError{Error: "Not a get request"})
+		return
+	}
+
+	dateStr := r.URL.Query().Get("date")
+	date, err := time.Parse("2006-01-02", dateStr)
+	if err != nil {
+		JSONResponse(w, http.StatusBadRequest, JSONError{Error: err.Error()})
+		return
+	}
+
+	data := make([]*Event, 0)
+	for _, val := range Calender.Events {
+		if val.Date.Day() == date.Day() {
+			data = append(data, val)
+		}
+	}
+
+	res, err := json.Marshal(data)
+	if err != nil {
+		JSONResponse(w, http.StatusBadRequest, JSONError{Error: err.Error()})
+		return
+	}
+
+	JSONResponse(w, http.StatusOK, JSONResult{Result: "events for day " + string(res)})
+}
+
+// GET /events_for_week.
+func EventsForWeekHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		JSONResponse(w, http.StatusInternalServerError, JSONError{Error: "Not a get request"})
+		return
+	}
+
+	dateStr := r.URL.Query().Get("date")
+	date, err := time.Parse("2006-01-02", dateStr)
+	if err != nil {
+		JSONResponse(w, http.StatusBadRequest, JSONError{Error: err.Error()})
+		return
+	}
+
+	data := make([]*Event, 0)
+	for _, val := range Calender.Events {
+		_, weekVal := val.Date.ISOWeek()
+		_, WeekNeeded := date.ISOWeek()
+		if weekVal == WeekNeeded {
+			data = append(data, val)
+		}
+	}
+
+	res, err := json.Marshal(data)
+	if err != nil {
+		JSONResponse(w, http.StatusBadRequest, JSONError{Error: err.Error()})
+		return
+	}
+
+	JSONResponse(w, http.StatusOK, JSONResult{Result: "Events for week " + string(res)})
+}
+
+// GET /events_for_month.
+func EventsForMonthHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		JSONResponse(w, http.StatusInternalServerError, JSONError{Error: "Not a get request"})
+		return
+	}
+
+	dateStr := r.URL.Query().Get("date")
+	date, err := time.Parse("2006-01-02", dateStr)
+	if err != nil {
+		JSONResponse(w, http.StatusBadRequest, JSONError{Error: err.Error()})
+		return
+	}
+
+	data := make([]*Event, 0)
+	for _, val := range Calender.Events {
+		if val.Date.Month() == date.Month() {
+			data = append(data, val)
+		}
+	}
+
+	res, err := json.Marshal(data)
+	if err != nil {
+		JSONResponse(w, http.StatusBadRequest, JSONError{Error: err.Error()})
+		return
+	}
+	JSONResponse(w, http.StatusOK, JSONResult{Result: "Events for month " + string(res)})
+}
+
+// Логирование запросов
+func LoggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Println(r.RequestURI)
+		log.Printf("Request: %s %s", r.Method, r.URL.Path)
 		next.ServeHTTP(w, r)
 	})
 }
 
-var events = make(map[int]Event)
-
-func createEvent(w http.ResponseWriter, r *http.Request) {
-	event, err := parseAndValidateParams(r.URL.Query())
-	// id, err := strconv.Atoi(r.URL.Query().Get("user_id"))
-	// title := r.URL.Query().Get("title")
-	// date := r.URL.Query().Get("date")
-
-	if err != nil {
-		http.Error(w, "Invalid parameters", http.StatusBadRequest)
-		return
-	}
-	// event := Event{
-	// 	ID:    id,
-	// 	Title: title,
-	// 	Date:  date,
-	// }
-	log.Println(event, err)
-	events[event.ID] = event
-
-	jsonData, err := toJSON(event)
-	if err != nil {
-		http.Error(w, "Error creating JSON", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(jsonData)
-}
-
-func updateEvent(w http.ResponseWriter, r *http.Request) {
-	event, err := parseAndValidateParams(r.URL.Query())
-	if err != nil {
-		http.Error(w, "Invalid parameters", http.StatusBadRequest)
-		return
-	}
-
-	_, exists := events[event.ID]
-	if !exists {
-		http.Error(w, "Event not found", http.StatusNotFound)
-		return
-	}
-
-	events[event.ID] = event
-
-	jsonData, err := toJSON(event)
-	if err != nil {
-		http.Error(w, "Error creating JSON", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(jsonData)
-}
-
-func deleteEvent(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.Atoi(r.URL.Query().Get("id"))
-	if err != nil {
-		http.Error(w, "Invalid ID", http.StatusBadRequest)
-		return
-	}
-
-	_, exists := events[id]
-	if !exists {
-		http.Error(w, "Event not found", http.StatusNotFound)
-		return
-	}
-
-	delete(events, id)
-
-	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(`{"result": "success"}`))
-}
-
-// Для методов events_for_day, events_for_week и events_for_month вам потребуется реализовать логику фильтрации событий по дате.
-// Это может быть сложно, так как Go не имеет встроенной поддержки для работы с датами в формате "год-месяц-день".
-// Вам потребуется использовать пакет "time" для парсинга дат и сравнения их.
-
-func eventsForDay(w http.ResponseWriter, r *http.Request) {
-	requestedDate, err := time.Parse("2006-01-02", r.URL.Query().Get("date"))
-	if err != nil {
-		http.Error(w, "Invalid date", http.StatusBadRequest)
-		return
-	}
-
-	var eventsForDay []Event
-	for _, event := range events {
-		eventDate, err := time.Parse("2006-01-02", event.Date)
-		if err != nil {
-			continue // Если дата события не может быть разобрана, пропустите это событие
-		}
-
-		if eventDate.Year() == requestedDate.Year() && eventDate.YearDay() == requestedDate.YearDay() {
-			eventsForDay = append(eventsForDay, event)
-		}
-	}
-
-	jsonData, err := json.Marshal(eventsForDay)
-	if err != nil {
-		http.Error(w, "Error creating JSON", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(jsonData)
-}
-
-// Аналогично можно реализовать функции eventsForWeek и eventsForMonth, сравнивая неделю и месяц года соответственно.
-
 func main() {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/create_event", createEvent)
-	mux.HandleFunc("/update_event", updateEvent)
-	mux.HandleFunc("/delete_event", deleteEvent)
-	mux.HandleFunc("/events_for_day", eventsForDay)
-	// Добавьте обработчики для events_for_week и events_for_month здесь
+	// Создание маршрутов HTTP
+	http.HandleFunc("/create_event", CreateEventHandler)
+	http.HandleFunc("/update_event", UpdateEventHandler)
+	http.HandleFunc("/delete_event", DeleteEventHandler)
+	http.HandleFunc("/events_for_day", EventsForDayHandler)
+	http.HandleFunc("/events_for_week", EventsForWeekHandler)
+	http.HandleFunc("/events_for_month", EventsForMonthHandler)
 
-	// Применение middleware
-	loggedRouter := loggingMiddleware(mux)
+	// Создание HTTP-сервера
+	server := &http.Server{
+		Addr:         ":8080",
+		Handler:      LoggingMiddleware(http.DefaultServeMux),
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+	}
 
-	log.Fatal(http.ListenAndServe(":8080", loggedRouter))
+	// Запуск HTTP-сервера
+	log.Println("Starting server on port 8080...")
+	log.Fatal(server.ListenAndServe())
 }
