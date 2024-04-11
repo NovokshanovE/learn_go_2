@@ -1,10 +1,40 @@
 package main
+import "fmt"
 
-import "github.com/learn_go_2/pattern"
+type Service interface {
+	fun(int, string) bool
+	
+}
 
-// import "github.com/AtomHackYaRUS"
+type Service2 interface {
+	fun(int) int
+}
 
-func main() {
-	SMAQQ := pattern.NewServiceManager()
-	SMAQQ.StartAll()
+type K1 struct{
+
+}
+type K2 struct{
+
+}
+type K struct{
+	K1
+	K2
+}
+
+func (k K)fun(int) int {
+	
+	return 20
+}  
+
+func (k K)fun(int, string) bool {
+	return true
+} 
+
+
+
+func main(){
+	k := K{}
+
+	fmt.Println(k.fun(20))
+	fmt.Println(k.fun(30, "oekxl"))
 }

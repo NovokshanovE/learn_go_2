@@ -1,86 +1,125 @@
 package main
 
-/*
-=== Взаимодействие с ОС ===
-
-Необходимо реализовать собственный шелл
-
-встроенные команды: cd/pwd/echo/kill/ps
-поддержать fork/exec команды
-конвеер на пайпах
-
-Реализовать утилиту netcat (nc) клиент
-принимать данные из stdin и отправлять в соединение (tcp/udp)
-Программа должна проходить все тесты. Код должен проходить проверки go vet и golint.
-*/
-
 import (
 	"bufio"
+	"bytes"
 	"fmt"
+	"io"
+	"log"
 	"os"
 	"os/exec"
 	"strings"
 )
 
+/*
+=== Взаимодействие с ОС ===
+
+Необходимо реализовать свой собственный UNIX-шелл-утилиту с поддержкой ряда простейших команд:
+
+- cd <args> - смена директории (в качестве аргумента могут быть то-то и то)
+- pwd - показать путь до текущего каталога
+- echo <args> - вывод аргумента в STDOUT
+- kill <args> - "убить" процесс, переданный в качесте аргумента (пример: такой-то пример)
+- ps - выводит общую информацию по запущенным процессам в формате *такой-то формат*
+
+Так же требуется поддерживать функционал fork/exec-команд
+
+Дополнительно необходимо поддерживать конвейер на пайпах (linux pipes, пример cmd1 | cmd2 | .... | cmdN).
+
+*Шелл — это обычная консольная программа, которая будучи запущенной, в интерактивном сеансе выводит некое приглашение
+в STDOUT и ожидает ввода пользователя через STDIN. Дождавшись ввода, обрабатывает команду согласно своей логике
+и при необходимости выводит результат на экран. Интерактивный сеанс поддерживается до тех пор, пока не будет введена команда выхода (например \quit).
+
+*/
+
 func main() {
-	reader := bufio.NewReader(os.Stdin)
 
-	for {
-		fmt.Print("$ ")
-		input, _ := reader.ReadString('\n')
-		input = strings.TrimSuffix(input, "\n")
+	buf := bufio.NewScanner(os.Stdin)
+	fmt.Print("Shell: ")
+	for buf.Scan() {
+		InputLine := buf.Text()
+		Shell(InputLine)
 
-		args := strings.Fields(input)
-		cmd := args[0]
-		switch cmd {
-		case "cd":
-			if len(args) < 2 {
-				fmt.Println("Необходимо указать аргумент для cd")
-				continue
-			}
-			err := os.Chdir(args[1])
-			if err != nil {
-				fmt.Println("Ошибка при смене директории:", err)
-			}
-		case "pwd":
-			dir, err := os.Getwd()
-			if err != nil {
-				fmt.Println("Ошибка при получении текущей директории:", err)
-			} else {
-				fmt.Println(dir)
-			}
-		case "echo":
-			if len(args) < 2 {
-				fmt.Println("Необходимо указать аргумент для echo")
-				continue
-			}
-			fmt.Println(strings.Join(args[1:], " "))
-		case "kill":
-			if len(args) < 2 {
-				fmt.Println("Необходимо указать процесс для завершения")
-				continue
-			}
-			out, err := exec.Command("kill", args[1]).Output()
-			if err != nil {
-				fmt.Println("Ошибка при завершении процесса:", err)
-			} else {
-				fmt.Println(string(out))
-			}
-		case "ps":
-			out, err := exec.Command("ps").Output()
-			if err != nil {
-				fmt.Println("Ошибка при выполнении команды ps:", err)
-			} else {
-				fmt.Println(string(out))
-			}
-		default:
-			cmd := exec.Command(args[0], args[1:]...)
-			cmd.Stderr = os.Stderr
-			cmd.Stdout = os.Stdout
-			err := cmd.Run()
-			if err != nil {
-				fmt.Println("Ошибка при выполнении команды:", err)
-			}
+		// fmt.Println("Для выхода используйте ctrl+c.")
+		fmt.Print("Shell: ")
+	}
+}
+
+func Shell(inputLine string) {
+
+	conveyor := strings.Split(inputLine, "|")
+
+	if strings.Contains(inputLine, "&") {
+		conveyor[len(conveyor)-1] = strings.ReplaceAll(conveyor[len(conveyor)-1], "&", "") // уберем & в конце
+		go doCommands(conveyor)
+
+		return
+	}
+
+	doCommands(conveyor)
+
+}
+
+func doCommands(conveyor []string) {
+
+	cmds := make([]*exec.Cmd, 0, len(conveyor))
+
+	for _, v := range conveyor {
+		v = strings.TrimSpace(v)
+		command := strings.Split(v, " ")
+
+		cmds = append(cmds, exec.Command(command[0], command[1:]...))
+	}
+
+	if len(cmds) == 1 { // если pipes не используются
+		cmds[0].Stdin = os.Stdin
+		cmds[0].Stdout = os.Stdout
+		cmds[0].Run()
+		return
+	}
+
+	output, stdErr, err := Pipeline(cmds)
+	if err != nil {
+		log.Print(err)
+		os.Exit(1)
+	}
+
+	io.Copy(os.Stdout, output)
+	io.Copy(os.Stderr, stdErr)
+
+	fmt.Print("Shell: ")
+}
+
+func Pipeline(cmds []*exec.Cmd) (*bytes.Buffer, *bytes.Buffer, error) {
+
+	var output bytes.Buffer
+	var stderr bytes.Buffer
+
+	cmds[0].Stdin = os.Stdin
+
+	last := len(cmds) - 1
+	for i, cmd := range cmds[:last] {
+		var err error
+		cmds[i+1].Stdin, err = cmd.StdoutPipe()
+		if err != nil {
+			return nil, nil, err
+		}
+
+		cmd.Stderr = &stderr
+	}
+
+	cmds[last].Stdout, cmds[last].Stderr = &output, &stderr
+
+	for _, cmd := range cmds {
+		err := cmd.Start()
+		if err != nil {
+			return nil, nil, err
 		}
 	}
+
+	for _, cmd := range cmds {
+		cmd.Wait()
+	}
+
+	return &output, &stderr, nil
 }
